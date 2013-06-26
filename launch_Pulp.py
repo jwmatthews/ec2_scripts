@@ -3,13 +3,11 @@ import os
 import sys
 import time
 from launch_instance import launch_instance, get_opt_parser, ssh_command, scp_to_command, run_command
-from optparse import OptionParser
 
 if __name__ == "__main__":
     start = time.time()
 
-    parser = OptionParser()
-    parser = get_opt_parser(parser=parser, vol_size=100)
+    parser = get_opt_parser(vol_size=100)
     (opts, args) = parser.parse_args()
     instance = launch_instance(opts)
     hostname = instance.dns_name
@@ -19,11 +17,12 @@ if __name__ == "__main__":
     # open firewall
     #
     print "Updating firewall rules"
-    ssh_command(hostname, ssh_user, ssh_key, "mkdir -p ~/tmp")
-    scp_to_command(hostname, ssh_user, ssh_key, "./etc/sysconfig/iptables", "~/tmp/")
-    ssh_command(hostname, ssh_user, ssh_key, "sudo cp ~/tmp/iptables /etc/sysconfig/iptables")
-
-    ssh_command(hostname, ssh_user, ssh_key, "sudo /sbin/service iptables restart")
+    ssh_command(hostname, ssh_user, ssh_key, "mkdir -p ~/etc/sysconfig")
+    scp_to_command(hostname, ssh_user, ssh_key, "./etc/sysconfig/iptables", "~/etc/sysconfig/iptables")
+    ssh_command(hostname, ssh_user, ssh_key, "sudo mv ~/etc/sysconfig/iptables /etc/sysconfig/iptables")
+    ssh_command(hostname, ssh_user, ssh_key, "sudo restorecon /etc/sysconfig/iptables")
+    ssh_command(hostname, ssh_user, ssh_key, "sudo chown root:root /etc/sysconfig/iptables")
+    ssh_command(hostname, ssh_user, ssh_key, "sudo service iptables restart")
     #
     # Run install script
     #

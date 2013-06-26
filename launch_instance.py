@@ -5,6 +5,7 @@
 #   AWS_SECRET_ACCESS_KEY
 #
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -19,9 +20,7 @@ except Exception, e:
     print "Try:  sudo yum install python-boto"
     sys.exit(1)
 
-def tag_instance(instance, hostname, ssh_user, ssh_key, rpm_name, tag_name=None):
-    status, out, err = ssh_command(hostname, ssh_user, ssh_key, "rpm -q --queryformat \"%{VERSION}\" " + rpm_name)
-    rpm_ver = out
+def tag_instance(instance, hostname, ssh_user, ssh_key, rpm_name=None, data=None):
     tag = ""
     if instance.__dict__.has_key("tags"):
         all_tags = instance.__dict__["tags"]
@@ -30,12 +29,13 @@ def tag_instance(instance, hostname, ssh_user, ssh_key, rpm_name, tag_name=None)
     if not tag:
         import getpass
         tag = "%s" % (getpass.getuser())
-    if tag_name:
-        tag += " %s %s" % (tag_name, rpm_ver)
-    else:
-        tag += " %s %s" % (rpm_name, rpm_ver)
+    if rpm_name:
+        status, out, err = ssh_command(hostname, ssh_user, ssh_key, "rpm -q --queryformat \"%{VERSION}\" " + rpm_name)
+        tag += " %s %s" % (rpm_name, out)
+    if data:
+        tag += " %s" % (data.strip())
     instance.add_tag("Name","%s" % (tag))
-    return rpm_ver
+    return tag
 
 def run_instance(conn, ami_id, key_name, instance_type, 
         sec_group, zone="us-east-1d", vol_size=None):
@@ -125,7 +125,7 @@ def ssh_command(hostname, ssh_user, ssh_key, command, exit_on_error=True):
     cmd = "ssh -o \"StrictHostKeyChecking no\" -t -i %s %s@%s \"%s\"" % (ssh_key, ssh_user, hostname, command)
     return run_command(cmd, exit_on_error=exit_on_error)
 
-def wait_for_ssh(instance, ssh_user, ssh_key, wait=30):
+def wait_for_ssh(instance, ssh_user, ssh_key, wait=40):
     """
     @param instance
     @param ssh_user
@@ -137,7 +137,7 @@ def wait_for_ssh(instance, ssh_user, ssh_key, wait=30):
         status, out, err = ssh_command(instance.dns_name, ssh_user, ssh_key, "ls", exit_on_error=False)
         if status:
             return True
-        time.sleep(5)
+        time.sleep(15)
     return False
 
 def resize_root_volume(instance, ssh_user, ssh_key, dev="/dev/xvde1"):
@@ -145,23 +145,26 @@ def resize_root_volume(instance, ssh_user, ssh_key, dev="/dev/xvde1"):
     # we are working with, even though our device mapping 
     # specifies them as '/dev/sda1/'
     print "Resizing %s on %s" % (dev, instance.dns_name)
-    status, out, err = ssh_command(instance.dns_name, ssh_user, ssh_key, "sudo /sbin/resize2fs %s" % (dev))
+    status, out, err = ssh_command(instance.dns_name, ssh_user, ssh_key, "resize2fs %s" % (dev))
     return status
 
 
-def get_opt_parser(parser=None, description=None, vol_size=25):
-    default_ami = "ami-cc5af9a5"
+def get_opt_parser(parser=None, description=None, vol_size=None):
+    # RHEL 6.3 default_ami = "ami-cc5af9a5"
+    default_ami = "ami-f6f16b9f" # RHEL 6.4
     default_ssh_key = None
     default_key_name = "splice"
     default_instance_type = "m1.large"
     default_zone = "us-east-1d"
     default_sec_group = "devel-testing"
     default_vol_size = vol_size
+    if not default_vol_size:
+        default_vol_size = 25
     if os.environ.has_key("CLOUDE_GIT_REPO"):
         default_ssh_key="%s/splice/aws/ssh-keys/splice_rsa" % os.environ["CLOUDE_GIT_REPO"]
     if not parser:
         parser = OptionParser(description=description)
-    parser.add_option('--ssh_user', action='store', default="root", 
+    parser.add_option('--ssh_user', action='store', default="ec2-user", 
             help="SSH username")
     parser.add_option('--ssh_key', action='store', default=default_ssh_key, 
             help="Path to ssh key, defaults to: %s" % (default_ssh_key))
@@ -179,6 +182,14 @@ def get_opt_parser(parser=None, description=None, vol_size=25):
         help="Root volume size, defaults to: %s" % (default_vol_size))
     return parser
 
+
+def verify_ssh_key_perms(key_path):
+    if not os.path.isfile(key_path):
+        raise Exception("ssh key '%s' was not found, or is not a usable file." % (key_path))
+    mode = oct(os.stat(key_path)[stat.ST_MODE])[-3:]
+    if mode != '600':
+        raise Exception("ssh key '%s' needs to have permissions '600' yet is set to '%s'. Please fix and retry" % (key_path, mode))
+
 def launch_instance(opts, tag=None):
     """
     @param opts: options from optparse.OptionParser.parse_args()
@@ -193,6 +204,7 @@ def launch_instance(opts, tag=None):
     ssh_user = opts.ssh_user
     ssh_key = opts.ssh_key
 
+    verify_ssh_key_perms(ssh_key)
     conn = EC2Connection()
     instance = run_instance(conn, ami_id=ami_id, key_name=key_name,
             instance_type=instance_type, sec_group=group, 
@@ -213,11 +225,12 @@ def launch_instance(opts, tag=None):
     if not wait_for_ssh(instance, ssh_user=ssh_user, ssh_key=ssh_key):
         print "%s never came up for SSH access" % (instance.dns_name)
         terminate(conn, instance)
-        return None
-    if not resize_root_volume(instance, ssh_user=ssh_user, ssh_key=ssh_key):
-        print "Failed to resize root filesystem on %s" % (instance.dns_name)
-        terminate(conn, instance)
-        return None
+        raise Exception("Instance never came up")
+    # No longer needed for RHEL 6.4+
+    #if not resize_root_volume(instance, ssh_user=ssh_user, ssh_key=ssh_key):
+    #    print "Failed to resize root filesystem on %s" % (instance.dns_name)
+    #    terminate(conn, instance)
+    #    return None
     return instance
 
 

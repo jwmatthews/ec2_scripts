@@ -4,7 +4,7 @@
 source ./functions.sh
 
 # Install EPEL
-rpm -Uvh http://download.fedoraproject.org/pub/epel/6/i386/epel-release-6-7.noarch.rpm || {
+rpm -Uvh http://download.fedoraproject.org/pub/epel/6/i386/epel-release-6-8.noarch.rpm || {
     echo "Unable to install EPEL"
     exit 1;
 }
