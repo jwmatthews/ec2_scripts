@@ -28,7 +28,17 @@ yum install -y mongodb-server mongodb pymongo || {
 chkconfig mongod on
 service mongod start
 
-yum --disablerepo="pulp-v2-stable" --enablerepo="pulp-v2-beta" groupinstall -y pulp-server pulp-admin || {
+# Workaround to avoid:  
+# Error unpacking rpm package m2crypto-0.21.1.pulp-8.el6.x86_64
+# error: unpacking of archive failed on file /usr/lib64/python2.6/site-packages/M2Crypto/DSA.pyc: cpio: lsetfilecon
+yum --disablerepo="pulp-v2-stable" --enablerepo="pulp-v2-testing" update -y m2crypto || {
+    echo "yum update of m2crypto failed"
+    exit 1;
+}
+
+
+#yum --disablerepo="pulp-v2-stable" --enablerepo="pulp-v2-beta" groupinstall -y pulp-server pulp-admin || {
+yum --disablerepo="pulp-v2-stable" --enablerepo="pulp-v2-testing" groupinstall -y pulp-server pulp-admin || {
     echo "yum groupinstall of pulp-server pulp-admin failed"
     exit 1;
 }
